@@ -22,6 +22,17 @@ python -m markitdown output.pptx | grep -iE "xxxx|lorem|ipsum|placeholder|this.*
 
 If grep returns results, fix them before declaring success.
 
+### 坐标边界 QA（每张幻灯片必须检查）
+
+幻灯片尺寸：**宽 10"，高 5.625"**。底部三色金条占据 y=5.37~5.625（0.255"）。
+
+检查清单：
+- `x + w ≤ 10`（元素不超出右边界）
+- `y + h ≤ 5.235`（内容区元素不进入底部金条区）
+- 底部金条：`y=5.37, h=0.255`（5.37+0.255=5.625，贴紧底部无空隙）
+- 多列卡片：`x[i] = startX + i*(cardW + gap)`，验证最后一列 `x[n-1] + cardW ≤ 9.6`
+- 卡片内容偏移：文字/元素 x 从卡片 x 至少 `+0.1"` 内缩，y 从卡片 y 至少 `+0.1"` 内缩
+
 ### Verification Loop
 
 1. Generate slides -> Extract text with `python -m markitdown output.pptx` -> Review content
@@ -109,4 +120,65 @@ slide.addShape(pres.shapes.RECTANGLE, { shadow, ... });
 const makeShadow = () => ({ type: "outer", blur: 6, offset: 2, color: "000000", opacity: 0.15 });
 slide.addShape(pres.shapes.RECTANGLE, { shadow: makeShadow(), ... });
 slide.addShape(pres.shapes.RECTANGLE, { shadow: makeShadow(), ... });
+```
+
+### PptxGenJS addShape 的 w/h 必须用属性名显式传递
+
+```javascript
+// ❌ 错误：JavaScript 对象简写语法会导致 w/h 错误地继承变量名
+const projCardW = 3.05;
+const projCardH = 2.15;
+slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+  x: px, y: projCardY, projCardW, projCardH,  // ❌ 错误！PptxGenJS 不认识 projCardW/projCardH
+  fill: { color: "F8F6F2" }
+});
+
+// ✅ 正确：必须用 w: 和 h: 显式赋值
+slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+  x: px, y: projCardY, w: projCardW, h: projCardH,  // ✅ 正确
+  fill: { color: "F8F6F2" }
+});
+```
+
+**这是最常见的位置错乱来源！** 当 `w:` 或 `h:` 缺失时，形状会使用默认尺寸（通常是 1" 或 0），导致内容溢出或错位。
+
+### 双层阴影叠加卡片会导致框图偏移
+
+```javascript
+// ❌ 禁止使用：阴影偏移层会造成视觉上的框图错位
+slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+  x: x + 0.04, y: y + 0.05, w, h,        // ❌ 偏移层
+  fill: { color: "1D1D1A", transparency: 60 }, ...
+});
+slide.addShape(pres.shapes.ROUNDED_RECTANGLE, { x, y, w, h, ... });  // 主体层
+
+// ✅ 正确：使用单层圆角矩形 + 金色边框
+slide.addShape(pres.shapes.ROUNDED_RECTANGLE, {
+  x, y, w, h,
+  fill: { color: "F8F6F2" },
+  line: { color: "C6A86F", width: 1 },
+  rectRadius: 0.08
+});
+```
+
+### 底部金条坐标错误导致与底部之间有空隙
+
+```javascript
+// ❌ 错误：深金层高度太小，金条与幻灯片底部之间有空隙（5.37+0.135=5.505 ≠ 5.625）
+slide.addShape(pres.shapes.RECTANGLE, { x: 0, y: 5.37, w: 10, h: 0.135, ... });
+
+// ✅ 正确：深金底层 y=5.37, h=0.255（5.37+0.255=5.625，紧贴底部无空隙）
+// 三层叠加（深金底层最厚，中金/浅金叠在上面）：
+slide.addShape(pres.shapes.RECTANGLE, {
+  x: 0, y: 5.37, w: 10, h: 0.255,   // 深金底层，贴底
+  fill: { color: "AA8241" }, line: { type: "none" }
+});
+slide.addShape(pres.shapes.RECTANGLE, {
+  x: 0, y: 5.37, w: 10, h: 0.135,   // 中金叠加
+  fill: { color: "C6A86F" }, line: { type: "none" }
+});
+slide.addShape(pres.shapes.RECTANGLE, {
+  x: 0, y: 5.37, w: 10, h: 0.05,    // 浅金细条，顶层装饰
+  fill: { color: "EDD7AE" }, line: { type: "none" }
+});
 ```
